@@ -1,5 +1,7 @@
 # DNS Migration Automation
 
+[![Python checks](https://github.com/DrOSAlchemist/dns-migration-automation/actions/workflows/ci.yaml/badge.svg)](https://github.com/DrOSAlchemist/dns-migration-automation/actions/workflows/ci.yaml)
+
 Provider-neutral Python tooling for planning and applying DNS zone migrations across Google Cloud DNS, Amazon Route 53, Azure DNS, and TCPWave REST endpoints. It validates zone data, diffs current and desired records, snapshots before writes, attempts automatic restoration after failed writes, checks resolver propagation, and supports read-only IPAM network lookup.
 
 ## Requirements

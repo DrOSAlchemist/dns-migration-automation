@@ -2,7 +2,7 @@
 
 [![Python checks](https://github.com/DrOSAlchemist/dns-migration-automation/actions/workflows/ci.yaml/badge.svg)](https://github.com/DrOSAlchemist/dns-migration-automation/actions/workflows/ci.yaml)
 
-Provider-neutral Python tooling for planning and applying DNS zone migrations across Google Cloud DNS, Amazon Route 53, Azure DNS, and TCPWave REST endpoints. It validates zone data, diffs current and desired records, snapshots before writes, attempts automatic restoration after failed writes, checks resolver propagation, and supports read-only IPAM network lookup.
+Provider-neutral Python tooling for planning and applying DNS zone migrations across Cloudflare, Google Cloud DNS, Amazon Route 53, Azure DNS, and TCPWave REST endpoints. It validates zone data, diffs current and desired records, snapshots before writes, attempts automatic restoration after failed writes, checks resolver propagation, and supports read-only IPAM network lookup.
 
 ## Requirements
 
@@ -17,7 +17,7 @@ source .venv/bin/activate
 python -m pip install -e '.[aws,gcp,azure,tcpwave]'
 ```
 
-Individual extras are available as `aws`, `gcp`, `azure`, and `tcpwave`. Tests inject fake SDK clients and do not need cloud credentials.
+Individual extras are available as `aws`, `gcp`, `azure`, and `tcpwave`. Cloudflare uses the Python standard library. Tests inject fake clients/transports and do not need provider credentials.
 
 ## Zone file
 
@@ -40,11 +40,12 @@ Add an environment mapping to `config/environments.yaml`. Keep secrets in enviro
 
 ```yaml
 environments:
-	production:
-		provider: route53
+	cloudflare_sandbox:
+		provider: cloudflare
 		zone: example.com
-		hosted_zone_id: Z0123456789EXAMPLE
-		region: us-east-1
+		zone_id: CLOUDFLARE_ZONE_ID
+		api_token: ${CLOUDFLARE_API_TOKEN}
+		timeout: 15
 		ipam:
 			provider: tcpwave
 			base_url: https://ipam.example.net
@@ -54,6 +55,7 @@ environments:
 
 Provider-specific required settings:
 
+- `cloudflare`: `zone_id`, `zone`, and `api_token`; create a scoped API token with DNS Read and DNS Write access limited to the sandbox zone, and set `CLOUDFLARE_API_TOKEN` locally.
 - `route53`: `hosted_zone_id`; optional `region`.
 - `cloud-dns`: `project_id`, `managed_zone`, and `zone`.
 - `azure-dns`: `subscription_id`, `resource_group`, and `zone`.
@@ -84,7 +86,7 @@ dns-migrate ipam-lookup 192.0.2.18 --inventory config/ipam-networks.json
 - `src/rollback.py` writes validated snapshots atomically and restores them through an adapter.
 - `src/cli.py` provides `validate`, `diff`, `apply`, `rollback`, `check`, and `ipam-lookup`.
 
-Cloud providers use their standard credential chains: AWS SDK credentials, Google Application Default Credentials, and Azure `DefaultAzureCredential` (managed identity when hosted). TCPWave accepts a bearer token or basic-auth credentials from environment-variable references. The adapters do not log credentials.
+Cloudflare uses a bearer API token; AWS, Google, and Azure use their standard credential chains. TCPWave accepts a bearer token or basic-auth credentials from environment-variable references. The adapters do not log credentials.
 
 ## Run checks
 
@@ -97,4 +99,4 @@ GitHub Actions installs the project and runs these checks on pushes and pull req
 
 ## Safety
 
-The CLI requires explicit confirmation for writes and snapshots current records first, but this is not a substitute for a staging run or an approved change window. Route 53 alias/routing-policy records and provider-specific metadata are rejected rather than flattened; apex SOA and NS records are left to the DNS provider. See the documented adapter limitations before using an adapter against a production zone. Provider adapters must be granted least-privilege permissions. Never commit credentials or production zone exports.
+The CLI requires explicit confirmation for writes and snapshots current records first, but this is not a substitute for a staging run or an approved change window. Cloudflare writes are individual API calls rather than an atomic zone transaction; proxied records and provider-specific metadata are rejected rather than flattened. Route 53 alias/routing-policy records are also rejected. Apex SOA and NS records are left to the DNS provider. See the documented adapter limitations before using an adapter against a production zone. Provider adapters must be granted least-privilege permissions. Never commit credentials or production zone exports.

@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from src.providers.azure_dns import AzureDNSAdapter
 from src.providers.cloud_dns import CloudDNSAdapter
+from src.providers.cloudflare import CloudflareAdapter
 from src.providers.route53 import Route53Adapter
 from src.providers.tcpwave import TCPWaveIPAMAdapter, TCPWaveRESTAdapter
 
@@ -65,6 +66,13 @@ def build_provider(config: Mapping[str, Any]) -> Any:
 			raise RuntimeError("Install Google Cloud DNS dependencies with: pip install -e '.[gcp]'") from error
 		client = dns.Client(project=_required_setting(config, "project_id"))
 		return CloudDNSAdapter(client, _required_setting(config, "managed_zone"), _required_setting(config, "zone"))
+	if provider in {"cloudflare", "cloudflare-dns"}:
+		return CloudflareAdapter(
+			_required_setting(config, "zone_id"),
+			_required_setting(config, "zone"),
+			_required_setting(config, "api_token"),
+			timeout=float(config.get("timeout", 15)),
+		)
 	if provider in {"azure-dns", "azure"}:
 		try:
 			from azure.identity import DefaultAzureCredential
@@ -83,7 +91,7 @@ def build_provider(config: Mapping[str, Any]) -> Any:
 			_required_setting(config, "replace_path"),
 			timeout=float(config.get("timeout", 15)),
 		)
-	raise ValueError("provider must be route53, cloud-dns, azure-dns, or tcpwave")
+	raise ValueError("provider must be route53, cloud-dns, cloudflare, azure-dns, or tcpwave")
 
 
 def build_ipam_adapter(config: Mapping[str, Any]) -> TCPWaveIPAMAdapter:

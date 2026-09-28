@@ -2,6 +2,14 @@
 
 The adapters reconcile the project's flat record schema with provider record sets. Optional SDK packages are isolated in `pyproject.toml` extras. Tests use injected clients and do not call provider APIs.
 
+## Cloudflare DNS
+
+No optional package is required. Configure `provider: cloudflare`, `zone`, `zone_id`, and `api_token`; use an environment reference such as `${CLOUDFLARE_API_TOKEN}` for the token. Create a Cloudflare API token scoped to the sandbox zone with DNS Read and DNS Write permissions. Listing is paginated automatically, and apex SOA and NS records remain provider-managed.
+
+The adapter supports the project's standard record types when they are unproxied and have no Cloudflare-only comments, tags, settings, private-routing, or glue metadata. Such records are rejected rather than silently losing behavior. Changes are sent as individual delete/create API calls, not an atomic zone change set; a failed request can leave a partially applied diff, so use the CLI snapshot and verify its best-effort rollback before relying on it.
+
+References: [Cloudflare DNS records API](https://developers.cloudflare.com/api/resources/dns/subresources/records/) and [API token setup](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/).
+
 ## AWS Route 53
 
 Install with `pip install -e '.[aws]'`. Configure `provider: route53`, `hosted_zone_id`, and optional `region`. boto3 uses its standard credential chain, such as an AWS profile locally or an IAM role in a hosted runner. Grant only the needed Route 53 list/change permissions for the target hosted zone.

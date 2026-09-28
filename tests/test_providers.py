@@ -1,11 +1,15 @@
+import json
 from types import SimpleNamespace
 import unittest
+from urllib.parse import parse_qs, urlparse
 
 from src.providers.azure_dns import AzureDNSAdapter
 from src.providers.cloud_dns import CloudDNSAdapter
+from src.providers.cloudflare import CloudflareAdapter
+from src.providers.factory import build_provider
 from src.providers.route53 import Route53Adapter
 from src.providers.tcpwave import TCPWaveIPAMAdapter, TCPWaveRESTAdapter
-from src.zone_diff import diff_zone
+from src.zone_diff import RecordSet, diff_zone
 
 
 class FakeResponse:
@@ -20,6 +24,124 @@ class FakeResponse:
 
 
 class ProviderAdapterTests(unittest.TestCase):
+	def test_cloudflare_lists_paginated_records_and_filters_apex_ns(self):
+		class Transport:
+			def __init__(self):
+				self.calls = []
+
+			def __call__(self, method, url, headers, body, _timeout):
+				self.calls.append((method, url, headers, body))
+				if parse_qs(urlparse(url).query)["page"] == ["1"]:
+					return {"success": True, "result": [
+						{"id": "ns-id", "name": "example.com", "type": "NS", "ttl": 86400, "content": "ns1.example.net", "proxied": False},
+						{"id": "a-id", "name": "www.example.com", "type": "A", "ttl": 300, "content": "192.0.2.10", "proxied": False},
+					], "result_info": {"page": 1, "total_pages": 2}}
+				return {"success": True, "result": [
+					{"id": "txt-id", "name": "example.com", "type": "TXT", "ttl": 300, "content": '"owner=dns"', "proxied": False},
+				], "result_info": {"page": 2, "total_pages": 2}}
+
+		transport = Transport()
+		adapter = CloudflareAdapter("zone-123", "example.com", "test-token", transport=transport)
+		records = adapter.list_records("example.com")
+
+		self.assertEqual(records, [
+			{"name": "www.example.com", "type": "A", "ttl": 300, "value": "192.0.2.10"},
+			{"name": "example.com", "type": "TXT", "ttl": 300, "value": "owner=dns"},
+		])
+		self.assertEqual(len(transport.calls), 2)
+		self.assertEqual(transport.calls[0][2]["Authorization"], "Bearer test-token")
+
+	def test_cloudflare_reconciles_changed_record_using_delete_and_create(self):
+		class Transport:
+			def __init__(self):
+				self.writes = []
+				self.list_calls = 0
+
+			def __call__(self, method, url, _headers, body, _timeout):
+				if method == "GET":
+					self.list_calls += 1
+					return {"success": True, "result": [
+						{"id": "record-1", "name": "www.example.com", "type": "A", "ttl": 300, "content": "192.0.2.10", "proxied": False},
+					], "result_info": {"page": 1, "total_pages": 1}}
+				self.writes.append((method, url, json.loads(body) if body else None))
+				return {"success": True, "result": {"id": "record-2"}}
+
+		transport = Transport()
+		adapter = CloudflareAdapter("zone-123", "example.com", "test-token", transport=transport)
+		changes = adapter.replace_zone("example.com", [
+			{"name": "www", "type": "A", "ttl": 120, "value": "192.0.2.20"},
+		])
+
+		self.assertEqual(len(changes.changed), 1)
+		self.assertEqual([call[0] for call in transport.writes], ["DELETE", "POST"])
+		self.assertIn("record-1", transport.writes[0][1])
+		self.assertEqual(transport.writes[1][2], {
+			"name": "www.example.com",
+			"type": "A",
+			"ttl": 120,
+			"proxied": False,
+			"content": "192.0.2.20",
+		})
+
+	def test_cloudflare_serializes_mx_and_txt_values(self):
+		mx = CloudflareAdapter._to_cloudflare_payload(
+			RecordSet("mail.example.com", "MX", 300, ("10 mx.example.com",)),
+			"10 mx.example.com",
+		)
+		txt = CloudflareAdapter._to_cloudflare_payload(
+			RecordSet("example.com", "TXT", 300, ("owner=dns",)),
+			"owner=dns",
+		)
+
+		self.assertEqual(mx["priority"], 10)
+		self.assertEqual(mx["content"], "mx.example.com")
+		self.assertEqual(txt["content"], '"owner=dns"')
+
+	def test_factory_builds_cloudflare_from_zone_token_settings(self):
+		adapter = build_provider({
+			"provider": "cloudflare",
+			"zone": "example.com",
+			"zone_id": "zone-123",
+			"api_token": "test-token",
+		})
+
+		self.assertIsInstance(adapter, CloudflareAdapter)
+		self.assertEqual(adapter.zone_id, "zone-123")
+
+	def test_cloudflare_refuses_proxied_records(self):
+		class Transport:
+			def __call__(self, *_args):
+				return {"success": True, "result": [
+					{"id": "record-1", "name": "www.example.com", "type": "A", "ttl": 300, "content": "192.0.2.10", "proxied": True},
+				], "result_info": {"page": 1, "total_pages": 1}}
+
+		adapter = CloudflareAdapter("zone-123", "example.com", "test-token", transport=Transport())
+		with self.assertRaisesRegex(NotImplementedError, "proxied records"):
+			adapter.list_records("example.com")
+
+	def test_cloudflare_rejects_stale_diff_before_writing(self):
+		class Transport:
+			def __init__(self):
+				self.writes = []
+
+			def __call__(self, method, _url, _headers, _body, _timeout):
+				if method == "GET":
+					return {"success": True, "result": [
+								{"id": "record-1", "name": "www.example.com", "type": "A", "ttl": 300, "content": "192.0.2.99", "proxied": False},
+					], "result_info": {"page": 1, "total_pages": 1}}
+				self.writes.append(method)
+				return {"success": True, "result": {"id": "record-2"}}
+
+		transport = Transport()
+		adapter = CloudflareAdapter("zone-123", "example.com", "test-token", transport=transport)
+		changes = diff_zone(
+			[{"name": "www.example.com", "type": "A", "ttl": 300, "value": "192.0.2.10"}],
+			[{"name": "www.example.com", "type": "A", "ttl": 300, "value": "192.0.2.20"}],
+		)
+		with self.assertRaisesRegex(RuntimeError, "changed after diff"):
+			adapter.apply_diff("example.com", changes)
+		self.assertEqual(transport.writes, [])
+
 	def test_route53_lists_and_replaces_record_sets(self):
 		class Paginator:
 			def paginate(self, **_kwargs):

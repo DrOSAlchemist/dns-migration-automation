@@ -1,0 +1,17 @@
+{
+  "zone": "example.com",
+  "records": [
+    {
+      "name": "www",
+      "type": "A",
+      "ttl": 300,
+      "value": "192.0.2.10"
+    },
+    {
+      "name": "@",
+      "type": "TXT",
+      "ttl": 300,
+      "value": "migration=example"
+    }
+  ]
+}

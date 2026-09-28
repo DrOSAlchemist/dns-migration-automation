@@ -6,6 +6,8 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from src.record_values import normalize_rdata
+
 
 SUPPORTED_TYPES = {"A", "AAAA", "CAA", "CNAME", "MX", "NS", "PTR", "SRV", "TXT"}
 _LABEL_PATTERN = re.compile(r"^[a-z0-9_*](?:[a-z0-9_-]*[a-z0-9_*])?$")
@@ -54,7 +56,7 @@ def validate_records(zone: str, records: Iterable[Mapping[str, Any]]) -> list[di
 				raise ValueError("ttl must be a positive integer")
 			if not isinstance(value, str) or not value.strip():
 				raise ValueError("value must be a non-empty string")
-			value = value.strip()
+			value = normalize_rdata(record_type, value)
 			if record_type in {"A", "AAAA"}:
 				parsed_value = ipaddress.ip_address(value)
 				required_version = 4 if record_type == "A" else 6

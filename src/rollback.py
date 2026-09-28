@@ -35,8 +35,8 @@ def save_snapshot(path: str | Path, zone: str, records: list[dict[str, Any]]) ->
 			os.unlink(temporary_path)
 
 
-def rollback(path: str | Path, provider: DNSProvider) -> int:
-	"""Validate and restore a saved snapshot, returning the number of restored records."""
+def load_snapshot(path: str | Path) -> tuple[str, list[dict[str, Any]]]:
+	"""Read and validate a snapshot without applying it to a provider."""
 	with Path(path).open(encoding="utf-8") as snapshot_file:
 		document = json.load(snapshot_file)
 	if not isinstance(document, dict):
@@ -45,6 +45,11 @@ def rollback(path: str | Path, provider: DNSProvider) -> int:
 	records = document.get("records")
 	if not isinstance(zone, str) or not isinstance(records, list):
 		raise ValueError("snapshot needs a string 'zone' and an array of 'records'")
-	validated_records = validate_records(zone, records)
+	return zone, validate_records(zone, records)
+
+
+def rollback(path: str | Path, provider: DNSProvider) -> int:
+	"""Validate and restore a saved snapshot, returning the number of restored records."""
+	zone, validated_records = load_snapshot(path)
 	provider.replace_zone(zone, validated_records)
 	return len(validated_records)

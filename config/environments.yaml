@@ -1,1 +1,16 @@
+# Keep credentials outside this file. Values can reference ${ENVIRONMENT_VARIABLE}.
+# Configure the destination details used by dns-migrate diff/apply/rollback.
 environments: {}
+
+# Example Route 53 environment:
+# environments:
+#   production:
+#     provider: route53
+#     zone: example.com
+#     hosted_zone_id: Z0123456789EXAMPLE
+#     region: us-east-1
+#     ipam:
+#       provider: tcpwave
+#       base_url: https://ipam.example.net
+#       networks_path: api/ipam/networks
+#       token: ${TCPWAVE_TOKEN}
